@@ -7,7 +7,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import math
 import io
 
-st.set_page_config(page_title="Dome Builder", layout="centered")
+st.set_page_config(page_title="Dome Builder", layout="wide")
 
 class DomeGenerator:
     def generate_geodesic_sphere(self, radius, freq):
@@ -91,14 +91,38 @@ class DomeGenerator:
             edges = [np.linalg.norm(verts[k] - verts[(k+1)%len(verts)]) for k in range(len(verts))]
             edges_sorted = np.sort(edges)
             
+            # Improved matching: check number of edges, edge lengths, and variance
             matched_type = -1
             for t_idx, p_type in enumerate(panel_types):
-                if abs(p_type['area'] - area) < 1e-3 and np.allclose(p_type['edges'], edges_sorted, atol=1e-3):
-                    matched_type = t_idx
-                    break
+                # Must have same number of edges
+                if len(p_type['edges']) != len(edges_sorted):
+                    continue
+                    
+                # Check edge lengths with stricter tolerance
+                if not np.allclose(p_type['edges'], edges_sorted, atol=1e-6, rtol=1e-4):
+                    continue
+                    
+                # Check area similarity
+                if abs(p_type['area'] - area) / max(p_type['area'], area) > 1e-4:
+                    continue
+                    
+                # Check edge variance (handles geometric differences)
+                var_match = np.var(p_type['edges'])
+                var_current = np.var(edges_sorted)
+                if abs(var_match - var_current) / max(abs(var_match), abs(var_current), 1e-10) > 1e-4:
+                    continue
+                    
+                matched_type = t_idx
+                break
             
             if matched_type == -1:
-                panel_types.append({'area': area, 'edges': edges_sorted, 'count': 1, 'master_verts': verts})
+                panel_types.append({
+                    'area': area, 
+                    'edges': edges_sorted, 
+                    'variance': np.var(edges_sorted),
+                    'count': 1, 
+                    'master_verts': verts
+                })
                 valid_regions[i]['type_id'] = len(panel_types)
             else:
                 panel_types[matched_type]['count'] += 1
@@ -172,61 +196,127 @@ class DomeGenerator:
         return pdf_buffer
 
     def create_3d_plot(self, valid_regions):
-        fig = plt.figure(figsize=(8, 8))
+        fig = plt.figure(figsize=(12, 10))
         ax = fig.add_subplot(111, projection='3d')
         
+        # Generate colors for different panel types
+        panel_type_colors = {}
+        colors = plt.cm.Set3(np.linspace(0, 1, 12))
+        
         faces = []
+        face_colors = []
         for data in valid_regions.values():
             faces.append(data['vertices'])
+            type_id = data['type_id']
+            if type_id not in panel_type_colors:
+                panel_type_colors[type_id] = colors[(type_id - 1) % len(colors)]
+            face_colors.append(panel_type_colors[type_id])
             
-        collection = Poly3DCollection(faces, alpha=0.7, edgecolors='k', linewidths=1)
-        collection.set_facecolor('#4CAF50')
+        collection = Poly3DCollection(faces, alpha=0.85, edgecolors='#333333', linewidths=0.8)
+        collection.set_facecolor(face_colors)
         ax.add_collection3d(collection)
         
+        # Add labels at centroids
         for data in valid_regions.values():
             c = data['centroid']
-            ax.text(c[0], c[1], c[2], str(data['type_id']), color='black', fontsize=10, ha='center', va='center', zorder=10)
+            ax.text(c[0], c[1], c[2], str(data['type_id']), 
+                   color='black', fontsize=9, ha='center', va='center', 
+                   zorder=10, fontweight='bold', 
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
 
-        ax.set_xlim([-15, 15])
-        ax.set_ylim([-15, 15])
-        ax.set_zlim([0, 15])
+        # Auto-scale axes based on data range
+        all_points = np.vstack([data['vertices'] for data in valid_regions.values()])
+        margin = 0.15
+        range_vals = np.ptp(all_points, axis=0)
+        center = np.mean(all_points, axis=0)
         
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
-        plt.tight_layout()
+        for i, (axis, setter) in enumerate([(ax.set_xlim, 'x'), (ax.set_ylim, 'y'), (ax.set_zlim, 'z')]):
+            min_val = center[i] - range_vals[i] / 2 * (1 + margin)
+            max_val = center[i] + range_vals[i] / 2 * (1 + margin)
+            axis([min_val, max_val])
         
+        ax.set_xlabel('X (cm)', fontsize=10, fontweight='bold')
+        ax.set_ylabel('Y (cm)', fontsize=10, fontweight='bold')
+        ax.set_zlabel('Z (cm)', fontsize=10, fontweight='bold')
+        
+        ax.view_init(elev=25, azim=45)
+        
+        fig.tight_layout()
         return fig
 
 # --- UI LOGIC ---
-st.title("Goldberg Dome CNC & Papercraft Generator")
-st.markdown("Generate custom dome plans and download the printable PDF for assembly.")
+st.set_page_config(page_title="Dome Builder", layout="wide")
 
-radius = st.number_input("Dome Radius (cm):", min_value=1.0, max_value=1000.0, value=15.0, step=1.0)
-freq = st.number_input("Subdivision Frequency (1 or 2 recommended):", min_value=1, max_value=5, value=1, step=1)
+st.title("🏛️ Goldberg Dome CNC & Papercraft Generator")
+st.markdown("Generate custom geodesic dome plans and download printable PDFs for assembly.")
 
-if st.button("Generate Dome & Plans", type="primary"):
-    with st.spinner("Calculating geometry..."):
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    radius = st.number_input("Dome Radius (cm):", min_value=1.0, max_value=1000.0, value=15.0, step=1.0)
+    
+with col2:
+    freq = st.number_input("Subdivision Frequency:", min_value=1, max_value=5, value=1, step=1)
+    
+with col3:
+    st.empty()
+
+if st.button("🔨 Generate Dome & Plans", type="primary", use_container_width=True):
+    with st.spinner("⏳ Calculating geodesic geometry..."):
         generator = DomeGenerator()
         try:
             valid_regions, panel_types = generator.process_dome(radius, freq)
             
-            st.success(f"Dome generated! Found {len(panel_types)} unique panel types out of {len(valid_regions)} total panels.")
+            # Stats display
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Panels", len(valid_regions))
+            with col2:
+                st.metric("Unique Types", len(panel_types))
+            with col3:
+                avg_panels = len(valid_regions) / len(panel_types) if panel_types else 0
+                st.metric("Avg per Type", f"{avg_panels:.1f}")
+            with col4:
+                dome_volume = (4/3) * np.pi * (radius ** 3) / 2
+                st.metric("Volume (cm³)", f"{dome_volume:,.0f}")
             
-            st.markdown("### 3D Preview")
-            fig = generator.create_3d_plot(valid_regions)
-            st.pyplot(fig)
+            st.divider()
             
-            with st.spinner("Compiling PDF..."):
+            # 3D Visualization with full width
+            st.markdown("### 📊 3D Preview")
+            with st.spinner("🎨 Rendering 3D model..."):
+                fig = generator.create_3d_plot(valid_regions)
+                st.pyplot(fig, use_container_width=True)
+            
+            st.divider()
+            
+            # Panel type details table
+            st.markdown("### 📋 Panel Type Details")
+            panel_details = []
+            for idx, p_type in enumerate(panel_types, 1):
+                panel_details.append({
+                    "Type": idx,
+                    "Count": p_type['count'],
+                    "Area (cm²)": f"{p_type['area']:.2f}",
+                    "Edge Variance": f"{p_type['variance']:.6f}",
+                    "Edges": f"{len(p_type['edges'])}"
+                })
+            
+            st.dataframe(panel_details, use_container_width=True)
+            
+            st.divider()
+            
+            with st.spinner("📄 Compiling PDF..."):
                 pdf_buffer = generator.create_pdf_buffer(valid_regions)
                 
-            st.markdown("### Download")
+            st.markdown("### 📥 Download")
             st.download_button(
                 label="📥 Download Printable Papercraft PDF",
                 data=pdf_buffer,
                 file_name=f"dome_plans_r{int(radius)}_f{freq}.pdf",
-                mime="application/pdf"
+                mime="application/pdf",
+                use_container_width=True
             )
             
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"❌ An error occurred: {e}", icon="🚨")
