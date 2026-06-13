@@ -322,7 +322,7 @@ if st.button("🔨 Generate Dome & Plans", type="primary", use_container_width=T
             st.error(f"❌ An error occurred: {e}", icon="🚨")
 
 
-```
+
         area = 0.0
         for i in range(len(vertices)):
             v1 = vertices[i]
