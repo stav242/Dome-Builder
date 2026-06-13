@@ -17,7 +17,8 @@ class DomeGenerator:
             [0, -1,  phi], [0,  1,  phi], [0, -1, -phi], [0,  1, -phi],
             [ phi, 0, -1], [ phi, 0,  1], [-phi, 0, -1], [-phi, 0,  1]
         ])
-        verts = verts / np.linalg.norm(verts[0])
+        # Normalize each vertex to unit length
+        verts = np.array([v / np.linalg.norm(v) for v in verts])
         
         if freq > 1:
             new_verts = list(verts)
@@ -44,9 +45,16 @@ class DomeGenerator:
         centroid = np.mean(vertices, axis=0)
         centered = vertices - centroid
         
-        v1 = centered[0] / np.linalg.norm(centered[0])
+        norm_0 = np.linalg.norm(centered[0])
+        if norm_0 < 1e-10:
+            raise ValueError("Cannot create 2D projection: degenerate geometry")
+        v1 = centered[0] / norm_0
+        
         v2 = centered[1] - np.dot(centered[1], v1) * v1
-        v2 = v2 / np.linalg.norm(v2)
+        norm_2 = np.linalg.norm(v2)
+        if norm_2 < 1e-10:
+            raise ValueError("Cannot create 2D projection: degenerate geometry")
+        v2 = v2 / norm_2
         
         coords_2d = np.array([[np.dot(p, v1), np.dot(p, v2)] for p in centered])
         return coords_2d
@@ -113,6 +121,11 @@ class DomeGenerator:
                     p2 = pts_2d[(j + 1) % len(pts_2d)]
                     edge_vec = p2 - p1
                     edge_len = np.linalg.norm(edge_vec)
+                    
+                    # Guard against zero-length edges
+                    if edge_len < 1e-10:
+                        continue
+                    
                     edge_dir = edge_vec / edge_len
                     
                     normal = np.array([edge_dir[1], -edge_dir[0]])
