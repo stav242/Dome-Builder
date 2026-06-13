@@ -71,11 +71,18 @@ class DomeGenerator:
             if centroid[2] > -0.1:  
                 valid_regions[i] = {'vertices': vertices, 'centroid': centroid, 'neighbors': {}}
 
-        for (i, j), ridge_vertices in sv.ridge_dict.items():
-            if i in valid_regions and j in valid_regions:
-                shared_edge = sv.vertices[ridge_vertices]
-                valid_regions[i]['neighbors'][j] = shared_edge
-                valid_regions[j]['neighbors'][i] = shared_edge
+        # Build neighbor relationships from ridge_points (works with newer scipy)
+        if hasattr(sv, 'ridge_points'):
+            for i, j in sv.ridge_points:
+                if i in valid_regions and j in valid_regions:
+                    # Find shared edge vertices
+                    region_i = sv.regions[i]
+                    region_j = sv.regions[j]
+                    shared_verts = np.intersect1d(region_i, region_j)
+                    if len(shared_verts) >= 2:
+                        shared_edge = sv.vertices[shared_verts]
+                        valid_regions[i]['neighbors'][j] = shared_edge
+                        valid_regions[j]['neighbors'][i] = shared_edge
 
         panel_types = []
         for i, data in valid_regions.items():
