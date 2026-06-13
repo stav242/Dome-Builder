@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import numpy as np
 from scipy.spatial import SphericalVoronoi
